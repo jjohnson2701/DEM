@@ -471,20 +471,29 @@ def get_lonlat_polygon(polygon,append_nan=True):
         lat = lat[~np.isnan(lat)]
     return lon,lat
 
-def get_lonlat_gdf(gdf,append_nan=True):
+def get_lonlat_gdf(gdf, append_nan=True, n_jobs=-1):
     '''
     Returns lon/lat of all exteriors and interiors of a GeoDataFrame.
+    Parallel version using multiprocessing.
     '''
-    lon = np.empty([0,1],dtype=float)
-    lat = np.empty([0,1],dtype=float)
-    for geom in gdf.geometry:
-        lon_geom,lat_geom = get_lonlat_geometry(geom)
-        lon = np.append(lon,lon_geom)
-        lat = np.append(lat,lat_geom)
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()
+        
+    with Pool(n_jobs) as pool:
+        # Process geometries in parallel
+        results = pool.map(get_lonlat_geometry, gdf.geometry)
+        
+    # Combine results
+    lon = np.empty([0,1], dtype=float)
+    lat = np.empty([0,1], dtype=float)
+    for lon_geom, lat_geom in results:
+        lon = np.append(lon, lon_geom)
+        lat = np.append(lat, lat_geom)
+        
     if append_nan == False:
         lon = lon[~np.isnan(lon)]
         lat = lat[~np.isnan(lat)]
-    return lon,lat
+    return lon, lat
 
 def get_lonlat_gdf_center(gdf):
     lon_min,lat_min,lon_max,lat_max = gdf.total_bounds
@@ -1020,22 +1029,26 @@ def geometries_contained(geom_1,geom_2,epsg_code,containment_threshold=1.0):
             containment = True
     return containment
 
-def get_contained_strips(strip_shp_data,strip_dates,epsg_code,STRIP_CONTAINMENT_THRESHOLD=0.9,STRIP_DELTA_TIME_THRESHOLD=0,N_STRIPS_CONTAINMENT=2):
+def parallel_get_contained_strips(strip_shp_data, strip_dates, epsg_code, STRIP_CONTAINMENT_THRESHOLD=0.9, 
+                                STRIP_DELTA_TIME_THRESHOLD=0, N_STRIPS_CONTAINMENT=2, n_jobs=-1):
     '''
-    Find strips that are fully contained by other strips AND are older than the one it is fully(/90%) contained by
-    Then, find strips that are fully contained by the union of two(/three) other strips AND both(/all) of those are newer
+    Parallel version of get_contained_strips using multiprocessing
     '''
-    strip_dates_datetime = np.asarray([datetime.datetime(year=int(s[0:4]),month=int(s[4:6]),day=int(s[6:8])) for s in strip_dates.astype(str)])
-    contain_dt_flag = np.ones(len(strip_shp_data),dtype=bool)
-    for i in range(len(strip_shp_data)):
-        idx_contained = np.asarray([geometries_contained(geom,strip_shp_data.geometry[i],epsg_code,STRIP_CONTAINMENT_THRESHOLD) for geom in strip_shp_data.geometry])
-        idx_contained[i] = False #because a geometry is fully contained by itself
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()
+        
+    strip_dates_datetime = np.asarray([datetime.datetime(year=int(s[0:4]),month=int(s[4:6]),day=int(s[6:8])) 
+                                     for s in strip_dates.astype(str)])
+    
+    def process_strip(i):
+        idx_contained = np.asarray([geometries_contained(geom,strip_shp_data.geometry[i],epsg_code,STRIP_CONTAINMENT_THRESHOLD) 
+                                  for geom in strip_shp_data.geometry])
+        idx_contained[i] = False
         idx_newer_strip = strip_dates_datetime[i] - strip_dates_datetime < datetime.timedelta(days=STRIP_DELTA_TIME_THRESHOLD)
-        contain_dt_flag[i] = ~np.any(np.logical_and(idx_contained,idx_newer_strip))
-        if contain_dt_flag[i] == False: #skip it if it's already contained by one other
-            continue
-        if N_STRIPS_CONTAINMENT < 2:
-            continue
+        contain_dt_flag = ~np.any(np.logical_and(idx_contained,idx_newer_strip))
+        
+        if contain_dt_flag == False or N_STRIPS_CONTAINMENT < 2:
+            return contain_dt_flag
         idx_intersection = np.argwhere(np.asarray([strip_shp_data.geometry[i].intersects(geom) for geom in strip_shp_data.geometry])).squeeze()
         idx_intersection = np.delete(idx_intersection,np.where(idx_intersection==i))
         if len(idx_intersection) < 2: #need at least 2 intersecting strips to see if it's contained by union of 2 other strips
@@ -1442,12 +1455,52 @@ def copy_single_strips(strip_shp_data,singles_dict,mosaic_dir,output_name,epsg_c
     np.savetxt(singles_file,np.c_[singles_list,singles_list_orig],fmt='%s',delimiter=',')
     return singles_list
 
-def sample_two_rasters(raster_primary,raster_secondary,csv_path,primary_ID='',secondary_ID=''):
-    output_file = f'tmp_output_{secondary_ID}_to_{primary_ID}.txt'
-    cat_primary_command = f"cat {csv_path} | gdallocationinfo -valonly -geoloc {raster_primary} > tmp_primary_{secondary_ID}_to_{primary_ID}.txt"
-    cat_secondary_command = f"cat {csv_path} | gdallocationinfo -valonly -geoloc {raster_secondary} > tmp_secondary_{secondary_ID}_to_{primary_ID}.txt"
-    subprocess.run(cat_primary_command,shell=True)
-    subprocess.run(cat_secondary_command,shell=True)
+def parallel_sample_two_rasters(raster_primary, raster_secondary, csv_path, primary_ID='', secondary_ID='', n_jobs=-1):
+    '''
+    Parallel version of sample_two_rasters using multiprocessing
+    '''
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()
+        
+    # Read coordinates
+    coords = pd.read_csv(csv_path, header=None, names=['x','y'])
+    
+    # Split coordinates into chunks for parallel processing
+    chunks = np.array_split(coords, n_jobs)
+    
+    def process_chunk(chunk):
+        chunk_file = f'tmp_chunk_{os.getpid()}.txt'
+        chunk.to_csv(chunk_file, index=False, header=False, sep=' ')
+        
+        # Sample primary raster
+        primary_command = f"cat {chunk_file} | gdallocationinfo -valonly -geoloc {raster_primary} > tmp_primary_{os.getpid()}.txt"
+        subprocess.run(primary_command, shell=True)
+        
+        # Sample secondary raster  
+        secondary_command = f"cat {chunk_file} | gdallocationinfo -valonly -geoloc {raster_secondary} > tmp_secondary_{os.getpid()}.txt"
+        subprocess.run(secondary_command, shell=True)
+        
+        # Read results
+        primary_vals = pd.read_csv(f'tmp_primary_{os.getpid()}.txt', header=None)[0]
+        secondary_vals = pd.read_csv(f'tmp_secondary_{os.getpid()}.txt', header=None)[0]
+        
+        # Cleanup temp files
+        os.remove(chunk_file)
+        os.remove(f'tmp_primary_{os.getpid()}.txt')
+        os.remove(f'tmp_secondary_{os.getpid()}.txt')
+        
+        return pd.DataFrame({
+            'x': chunk['x'],
+            'y': chunk['y'], 
+            'h_primary': primary_vals,
+            'h_secondary': secondary_vals
+        })
+    
+    with Pool(n_jobs) as pool:
+        results = pool.map(process_chunk, chunks)
+    
+    # Combine results
+    df = pd.concat(results)
     fill_nan_primary_command = f"awk '!NF{{$0=\"NaN\"}}1' tmp_primary_{secondary_ID}_to_{primary_ID}.txt > tmp2_primary_{secondary_ID}_to_{primary_ID}.txt"
     fill_nan_secondary_command = f"awk '!NF{{$0=\"NaN\"}}1' tmp_secondary_{secondary_ID}_to_{primary_ID}.txt > tmp2_secondary_{secondary_ID}_to_{primary_ID}.txt"
     subprocess.run(fill_nan_primary_command,shell=True)

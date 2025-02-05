@@ -234,7 +234,9 @@ def main():
             subprocess.run('ogr2ogr ' + output_strips_shp_file_dissolved + ' ' + output_strips_shp_file + ' -dialect sqlite -sql \'SELECT ST_Union("geometry") FROM "' + os.path.basename(output_strips_shp_file).replace('.shp','') + '"\'',shell=True)
 
             if all_strips_flag == False:
-                idx_contained = get_contained_strips(strip_shp_data,strip_dates,epsg_code,STRIP_CONTAINMENT_THRESHOLD,STRIP_DELTA_TIME_THRESHOLD,N_STRIPS_CONTAINMENT)
+                idx_contained = parallel_get_contained_strips(strip_shp_data,strip_dates,epsg_code,
+                                                           STRIP_CONTAINMENT_THRESHOLD,STRIP_DELTA_TIME_THRESHOLD,
+                                                           N_STRIPS_CONTAINMENT, n_jobs=N_cpus)
                 strip_dates = strip_dates[idx_contained]
                 strip_list = strip_list[idx_contained]
                 strip_shp_data = strip_shp_data.iloc[idx_contained].reset_index(drop=True)
