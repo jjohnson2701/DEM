@@ -1540,6 +1540,9 @@ def parallel_sample_two_rasters(raster_primary, raster_secondary, csv_path, prim
     
     # Combine results
     df = pd.concat(results)
+    # Create output filename
+    output_file = f'tmp_sampled_{primary_ID}_{secondary_ID}.csv'
+    
     fill_nan_primary_command = f"awk '!NF{{$0=\"NaN\"}}1' tmp_primary_{secondary_ID}_to_{primary_ID}.txt > tmp2_primary_{secondary_ID}_to_{primary_ID}.txt"
     fill_nan_secondary_command = f"awk '!NF{{$0=\"NaN\"}}1' tmp_secondary_{secondary_ID}_to_{primary_ID}.txt > tmp2_secondary_{secondary_ID}_to_{primary_ID}.txt"
     subprocess.run(fill_nan_primary_command,shell=True)
