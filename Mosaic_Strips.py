@@ -12,6 +12,7 @@ import datetime
 import warnings
 import configparser
 import ctypes as c
+import multiprocessing
 
 from dem_utils import (get_strip_list, get_strip_extents, get_gsw, get_strip_shp,
                       filter_strip_gsw, find_cloud_water, get_valid_strip_overlaps,
