@@ -188,14 +188,18 @@ def main():
             strip_shp_data = gpd.GeoDataFrame()
             strip_idx = np.ones(len(strip_list),dtype=bool)
             print('Loading strips...')
-            for j,strip in enumerate(strip_list):
-                sys.stdout.write('\r')
-                n_progressbar = (j + 1) / len(strip_list)
-                sys.stdout.write("[%-20s] %d%%" % ('='*int(20*n_progressbar), 100*n_progressbar))
-                sys.stdout.flush()
-                wv_strip_shp = get_strip_shp(strip,tmp_dir)
-                wv_strip_shp_filtered_gsw = filter_strip_gsw(wv_strip_shp,gsw_main_sea_only,STRIP_AREA_THRESHOLD,POLYGON_AREA_THRESHOLD,GSW_OVERLAP_THRESHOLD,STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD)
-                if wv_strip_shp_filtered_gsw is None:
+            # Get all strip shapes first
+            print("Getting strip shapes...")
+            strip_shapes = parallel_get_strip_shp(strip_list, tmp_dir, n_jobs=N_cpus)
+            
+            print("Filtering strips...")
+            filtered_shapes = parallel_filter_strip_gsw(strip_shapes, gsw_main_sea_only, 
+                                                      STRIP_AREA_THRESHOLD, POLYGON_AREA_THRESHOLD,
+                                                      GSW_OVERLAP_THRESHOLD, STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD,
+                                                      n_jobs=N_cpus)
+            
+            for j, (strip, filtered_shape) in enumerate(zip(strip_list, filtered_shapes)):
+                if filtered_shape is None:
                     strip_idx[j] = False
                     continue
                 tmp_mp = shapely.ops.unary_union([Polygon(g) for g in wv_strip_shp_filtered_gsw.geometry.exterior])

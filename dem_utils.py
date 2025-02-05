@@ -919,6 +919,27 @@ def parallel_get_strip_shp(strips, tmp_dir, n_jobs=-1):
     return results
 
 
+def parallel_filter_strip_gsw(wv_strip_shp_list, gsw_shp_data, STRIP_AREA_THRESHOLD, POLYGON_AREA_THRESHOLD, 
+                            GSW_OVERLAP_THRESHOLD, STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD, n_jobs=-1):
+    '''
+    Parallel version of filter_strip_gsw using multiprocessing
+    '''
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()
+    
+    with Pool(n_jobs) as pool:
+        # Partial function with fixed arguments
+        filter_partial = partial(filter_strip_gsw, gsw_shp_data=gsw_shp_data,
+                               STRIP_AREA_THRESHOLD=STRIP_AREA_THRESHOLD,
+                               POLYGON_AREA_THRESHOLD=POLYGON_AREA_THRESHOLD,
+                               GSW_OVERLAP_THRESHOLD=GSW_OVERLAP_THRESHOLD,
+                               STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD=STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD)
+        
+        # Map function across strips in parallel
+        results = pool.map(filter_partial, wv_strip_shp_list)
+    
+    return results
+
 def filter_strip_gsw(wv_strip_shp,gsw_shp_data,STRIP_AREA_THRESHOLD,POLYGON_AREA_THRESHOLD,GSW_OVERLAP_THRESHOLD,STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD):
     '''
     Filters the separate polygons of the strip outline with the GSW dataset.
