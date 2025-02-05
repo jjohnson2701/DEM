@@ -38,7 +38,8 @@ def main():
     parser.add_argument('--gsw',default=None,help='Path to GSW shapefile')
     # parser.add_argument('--machine',default='t',help='Machine to run on.',choices=['t','b','local'])
     parser.add_argument('--dir_structure',default='sealevel',help='Directory structure of input strips (sealevel, simple or scenes)',choices=['sealevel','simple','scenes'])
-    parser.add_argument('--N_cpus',help='Number of CPUs to use',default=1,type=int)
+    parser.add_argument('--parallel', action='store_true', help='Run in parallel using all available CPUs')
+    parser.add_argument('--N_cpus', help='Number of CPUs to use (ignored if --parallel is set)', default=1, type=int)
     parser.add_argument('--horizontal',default=False,help='Incorperate horizontal alignment in mosaic?',action='store_true')
     parser.add_argument('--cloud_water_filter',default='default',nargs='?',help='Use cloud and water filter?')
     parser.add_argument('--corrected',default=False,help='Find corrected strips instead?',action='store_true')
@@ -53,7 +54,7 @@ def main():
     single_loc_name = args.loc_name
     # machine_name = args.machine
     dir_structure = args.dir_structure
-    N_cpus = args.N_cpus
+    N_cpus = multiprocessing.cpu_count() if args.parallel else args.N_cpus
     horizontal_flag = args.horizontal
     cloud_water_filter_flag = args.cloud_water_filter
     corrected_flag = args.corrected
