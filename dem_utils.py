@@ -1041,7 +1041,7 @@ def parallel_get_contained_strips(strip_shp_data, strip_dates, epsg_code, STRIP_
                                      for s in strip_dates.astype(str)])
     
     def process_strip(i):
-        contain_dt_flag = np.ones(len(strip_shp_data.geometry), dtype=bool)
+        contain_dt_flag = np.ones(len(strip_shp_data), dtype=bool)
         idx_contained = np.asarray([geometries_contained(geom,strip_shp_data.geometry[i],epsg_code,STRIP_CONTAINMENT_THRESHOLD) 
                                   for geom in strip_shp_data.geometry])
         idx_contained[i] = False
