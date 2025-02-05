@@ -182,6 +182,9 @@ def main():
 
             if gsw_main_sea_only is not None:
                 gsw_main_sea_only_buffered = gsw_main_sea_only.buffer(0)
+                lon_gsw,lat_gsw = get_lonlat_gdf(gsw_main_sea_only, n_jobs=N_cpus)
+                arrx_gsw = (c.c_float * len(lon_gsw))(*lon_gsw)
+                arry_gsw = (c.c_float * len(lat_gsw))(*lat_gsw)
             else:
                 gsw_main_sea_only_buffered = None
 
