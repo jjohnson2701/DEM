@@ -1052,7 +1052,7 @@ def parallel_get_contained_strips(strip_shp_data, strip_dates, epsg_code, STRIP_
         idx_intersection = np.argwhere(np.asarray([strip_shp_data.geometry[i].intersects(geom) for geom in strip_shp_data.geometry])).squeeze()
         idx_intersection = np.delete(idx_intersection,np.where(idx_intersection==i))
         if len(idx_intersection) < 2: #need at least 2 intersecting strips to see if it's contained by union of 2 other strips
-            continue
+            return contain_dt_flag
         idx_intersection_combinations = np.reshape(np.stack(np.meshgrid(idx_intersection,idx_intersection),-1),(len(idx_intersection)*len(idx_intersection),2))
         idx_intersection_combinations = np.delete(idx_intersection_combinations,idx_intersection_combinations[:,0]==idx_intersection_combinations[:,1],axis=0)
         idx_intersection_combinations = np.unique(np.sort(idx_intersection_combinations, axis=1), axis=0)
@@ -1060,11 +1060,11 @@ def parallel_get_contained_strips(strip_shp_data, strip_dates, epsg_code, STRIP_
         idx_newer_strip = strip_dates_datetime[i] - strip_dates_datetime[idx_intersection_combinations] < datetime.timedelta(days=STRIP_DELTA_TIME_THRESHOLD)
         contain_dt_flag[i] = ~np.any(np.logical_and(idx_contained_combo,np.all(idx_newer_strip,axis=1)))
         if contain_dt_flag[i] == False: #skip it if it's already contained by two others
-            continue
+            return contain_dt_flag
         if N_STRIPS_CONTAINMENT < 3:
-            continue
+            return contain_dt_flag
         if len(idx_intersection) < 3: #need at least 3 intersecting strips to see if it's contained by union of 3 other strips
-            continue
+            return contain_dt_flag
         idx_intersection_combinations = np.reshape(np.stack(np.meshgrid(idx_intersection,idx_intersection,idx_intersection),-1),(len(idx_intersection)*len(idx_intersection)*len(idx_intersection),3))
         idx_intersection_combinations = np.delete(idx_intersection_combinations,idx_intersection_combinations[:,0]==idx_intersection_combinations[:,1],axis=0)
         idx_intersection_combinations = np.delete(idx_intersection_combinations,idx_intersection_combinations[:,0]==idx_intersection_combinations[:,2],axis=0)
