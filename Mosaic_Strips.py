@@ -237,7 +237,13 @@ def main():
             strip_shp_data.to_file(output_strips_shp_file_filtered)
             subprocess.run('ogr2ogr ' + output_strips_shp_file_filtered_dissolved + ' ' + output_strips_shp_file_filtered + ' -dialect sqlite -sql \'SELECT ST_Union("geometry") FROM "' + os.path.basename(output_strips_shp_file_filtered).replace('.shp','') + '"\'',shell=True)
             
-            valid_strip_overlaps = get_valid_strip_overlaps(strip_shp_data,gsw_main_sea_only_buffered,AREA_OVERLAP_THRESHOLD,GSW_INTERSECTION_THRESHOLD)
+            if N_cpus > 1:
+                valid_strip_overlaps = parallel_get_valid_strip_overlaps(strip_shp_data, gsw_main_sea_only_buffered, 
+                                                                       AREA_OVERLAP_THRESHOLD, GSW_INTERSECTION_THRESHOLD, 
+                                                                       n_jobs=N_cpus)
+            else:
+                valid_strip_overlaps = get_valid_strip_overlaps(strip_shp_data, gsw_main_sea_only_buffered,
+                                                              AREA_OVERLAP_THRESHOLD, GSW_INTERSECTION_THRESHOLD)
             mst_array,mst_weighted_array = get_minimum_spanning_tree(valid_strip_overlaps,strip_dates)
             #Need to weight mst_array by delta time (and overlapping area?)
             

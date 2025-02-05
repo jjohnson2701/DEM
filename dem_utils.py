@@ -1041,6 +1041,43 @@ def get_contained_strips(strip_shp_data,strip_dates,epsg_code,STRIP_CONTAINMENT_
         contain_dt_flag[i] = ~np.any(np.logical_and(idx_contained_combo,np.all(idx_newer_strip,axis=1)))
     return contain_dt_flag
 
+def parallel_get_valid_strip_overlaps(strip_shp_data, gsw_main_sea_only_buffered, AREA_OVERLAP_THRESHOLD, GSW_INTERSECTION_THRESHOLD, n_jobs=-1):
+    '''
+    Parallel version of get_valid_strip_overlaps using multiprocessing
+    '''
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()
+
+    if gsw_main_sea_only_buffered is not None:
+        gsw_polygon = shapely.ops.unary_union(gsw_main_sea_only_buffered.geometry)
+    else:
+        gsw_polygon = None
+
+    def process_strip(i):
+        valid_overlaps = np.zeros(len(strip_shp_data))
+        idx_intersection = np.asarray([strip_shp_data.geometry[i].intersects(geom) for geom in strip_shp_data.geometry])
+        idx_intersection[i] = False
+        
+        idx_area_threshold = [strip_shp_data.geometry[i].intersection(adjacent_geom).area > AREA_OVERLAP_THRESHOLD 
+                            if idx_intersection[ii] else False 
+                            for ii,adjacent_geom in enumerate(strip_shp_data.geometry)]
+        
+        if gsw_main_sea_only_buffered is not None:
+            idx_gsw_threshold = [strip_shp_data.geometry[i].intersection(adjacent_geom).intersection(gsw_polygon).area / 
+                               strip_shp_data.geometry[i].intersection(adjacent_geom).area < GSW_INTERSECTION_THRESHOLD 
+                               if idx_intersection[ii] else False 
+                               for ii,adjacent_geom in enumerate(strip_shp_data.geometry)]
+        else:
+            idx_gsw_threshold = idx_area_threshold
+            
+        valid_overlaps = np.logical_and(idx_area_threshold, idx_gsw_threshold).astype(int)
+        return valid_overlaps
+
+    with Pool(n_jobs) as pool:
+        results = pool.map(process_strip, range(len(strip_shp_data)))
+    
+    return np.array(results)
+
 def get_valid_strip_overlaps(strip_shp_data,gsw_main_sea_only_buffered,AREA_OVERLAP_THRESHOLD,GSW_INTERSECTION_THRESHOLD):
     '''
     for each strip, find overlap and perform checks:
