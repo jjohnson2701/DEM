@@ -16,7 +16,7 @@ from dem_utils import get_strip_list,get_strip_extents
 from dem_utils import get_gsw,get_strip_shp,filter_strip_gsw,find_cloud_water
 from dem_utils import get_contained_strips,get_valid_strip_overlaps,get_minimum_spanning_tree
 from dem_utils import find_mosaic,build_mosaic,copy_single_strips
-from dem_utils import parallel_get_valid_strip_overlaps
+from dem_utils import parallel_get_valid_strip_overlaps, parallel_get_strip_shp, parallel_filter_strip_gsw
 
 def main():
     warnings.simplefilter(action='ignore')
@@ -202,7 +202,7 @@ def main():
                 if filtered_shape is None:
                     strip_idx[j] = False
                     continue
-                tmp_mp = shapely.ops.unary_union([Polygon(g) for g in wv_strip_shp_filtered_gsw.geometry.exterior])
+                tmp_mp = shapely.ops.unary_union([Polygon(g) for g in filtered_shape.geometry.exterior])
                 df_strip = pd.DataFrame({'strip':[strip]})
                 tmp_gdf = gpd.GeoDataFrame(df_strip,geometry=[tmp_mp],crs='EPSG:'+epsg_code)
                 strip_shp_data = gpd.GeoDataFrame(pd.concat([strip_shp_data,tmp_gdf],ignore_index=True),crs='EPSG:'+epsg_code)
