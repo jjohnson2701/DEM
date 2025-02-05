@@ -1041,6 +1041,7 @@ def parallel_get_contained_strips(strip_shp_data, strip_dates, epsg_code, STRIP_
                                      for s in strip_dates.astype(str)])
     
     def process_strip(i):
+        contain_dt_flag = np.ones(len(strip_shp_data.geometry), dtype=bool)
         idx_contained = np.asarray([geometries_contained(geom,strip_shp_data.geometry[i],epsg_code,STRIP_CONTAINMENT_THRESHOLD) 
                                   for geom in strip_shp_data.geometry])
         idx_contained[i] = False
@@ -1454,6 +1455,44 @@ def copy_single_strips(strip_shp_data,singles_dict,mosaic_dir,output_name,epsg_c
     singles_file = f'{mosaic_dir+output_name}_Single_Strips.txt'
     np.savetxt(singles_file,np.c_[singles_list,singles_list_orig],fmt='%s',delimiter=',')
     return singles_list
+
+def sample_two_rasters(raster_primary, raster_secondary, csv_path, primary_ID='', secondary_ID=''):
+    """Sample values from two rasters at given coordinates"""
+    output_file = f'tmp_sampled_{secondary_ID}_to_{primary_ID}.csv'
+    
+    # Sample primary raster
+    primary_command = f"cat {csv_path} | gdallocationinfo -valonly -geoloc {raster_primary} > tmp_primary_{secondary_ID}_to_{primary_ID}.txt"
+    subprocess.run(primary_command, shell=True)
+    
+    # Sample secondary raster
+    secondary_command = f"cat {csv_path} | gdallocationinfo -valonly -geoloc {raster_secondary} > tmp_secondary_{secondary_ID}_to_{primary_ID}.txt"
+    subprocess.run(secondary_command, shell=True)
+    
+    # Handle empty lines
+    fill_nan_primary_command = f"awk '!NF{{$0=\"NaN\"}}1' tmp_primary_{secondary_ID}_to_{primary_ID}.txt > tmp2_primary_{secondary_ID}_to_{primary_ID}.txt"
+    fill_nan_secondary_command = f"awk '!NF{{$0=\"NaN\"}}1' tmp_secondary_{secondary_ID}_to_{primary_ID}.txt > tmp2_secondary_{secondary_ID}_to_{primary_ID}.txt"
+    subprocess.run(fill_nan_primary_command, shell=True)
+    subprocess.run(fill_nan_secondary_command, shell=True)
+    
+    # Create output filename
+    output_file = f'tmp_sampled_{primary_ID}_{secondary_ID}.csv'
+    
+    # Combine results
+    paste_command = f"paste -d , {csv_path} tmp2_primary_{secondary_ID}_to_{primary_ID}.txt tmp2_secondary_{secondary_ID}_to_{primary_ID}.txt > {output_file}"
+    subprocess.run(paste_command, shell=True)
+    subprocess.run(f"sed -i 's/ /,/g' {output_file}", shell=True)
+    subprocess.run(f"sed -i '/-9999/d' {output_file}", shell=True)
+    subprocess.run(f"sed -i '/NaN/d' {output_file}", shell=True)
+    subprocess.run(f"sed -i '/nan/d' {output_file}", shell=True)
+    
+    # Read and clean up
+    df = pd.read_csv(output_file, header=None, names=['x','y','h_primary','h_secondary'], 
+                     dtype={'x':'float','y':'float','h_primary':'float','h_secondary':'float'})
+    
+    subprocess.run(f"rm tmp_primary_{secondary_ID}_to_{primary_ID}.txt tmp2_primary_{secondary_ID}_to_{primary_ID}.txt " + 
+                  f"tmp_secondary_{secondary_ID}_to_{primary_ID}.txt tmp2_secondary_{secondary_ID}_to_{primary_ID}.txt {output_file}", shell=True)
+    
+    return df
 
 def parallel_sample_two_rasters(raster_primary, raster_secondary, csv_path, primary_ID='', secondary_ID='', n_jobs=-1):
     '''
