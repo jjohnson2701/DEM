@@ -1049,7 +1049,7 @@ def parallel_get_contained_strips(strip_shp_data, strip_dates, epsg_code, STRIP_
         contain_dt_flag = ~np.any(np.logical_and(idx_contained,idx_newer_strip))
         
         if contain_dt_flag == False or N_STRIPS_CONTAINMENT < 2:
-            return contain_dt_flag
+            return contain_dt_flag[i]
         idx_intersection = np.argwhere(np.asarray([strip_shp_data.geometry[i].intersects(geom) for geom in strip_shp_data.geometry])).squeeze()
         idx_intersection = np.delete(idx_intersection,np.where(idx_intersection==i))
         if len(idx_intersection) < 2: #need at least 2 intersecting strips to see if it's contained by union of 2 other strips
@@ -1074,7 +1074,9 @@ def parallel_get_contained_strips(strip_shp_data, strip_dates, epsg_code, STRIP_
         idx_contained_combo = np.asarray([geometries_contained(strip_shp_data.geometry[combo[0]].union(strip_shp_data.geometry[combo[1]]).union(strip_shp_data.geometry[combo[2]]),strip_shp_data.geometry[i],epsg_code,STRIP_CONTAINMENT_THRESHOLD) for combo in idx_intersection_combinations])
         idx_newer_strip = strip_dates_datetime[i] - strip_dates_datetime[idx_intersection_combinations] < datetime.timedelta(days=STRIP_DELTA_TIME_THRESHOLD)
         contain_dt_flag[i] = ~np.any(np.logical_and(idx_contained_combo,np.all(idx_newer_strip,axis=1)))
-    return contain_dt_flag
+    with Pool(n_jobs) as pool:
+        results = pool.map(process_strip, range(len(strip_shp_data)))
+    return np.array(results)
 
 def parallel_get_valid_strip_overlaps(strip_shp_data, gsw_main_sea_only_buffered, AREA_OVERLAP_THRESHOLD, GSW_INTERSECTION_THRESHOLD, n_jobs=-1):
     '''
