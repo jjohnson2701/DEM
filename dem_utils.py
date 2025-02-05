@@ -11,8 +11,10 @@ import subprocess
 import datetime
 import ctypes as c
 import multiprocessing
+from multiprocessing import Pool
 import itertools
 import shutil
+from functools import partial
 
 def reinsert_nan(array_clean,array_nan):
     '''
@@ -721,15 +723,25 @@ def get_strip_extents(strip,round_flag=False,N_round=3):
         lat_max = np.ceil(lat_max * 10**N_round) / 10**N_round
     return lon_min,lon_max,lat_min,lat_max
 
-def get_list_extents(file_list,round_flag=False,N_round=3):
-    lon_min,lon_max,lat_min,lat_max = 180,-180,90,-90
-    for f in file_list:
-        lon_min_single_file,lon_max_single_file,lat_min_single_file,lat_max_single_file = get_strip_extents(f,round_flag=round_flag,N_round=N_round)
-        lon_min = np.min((lon_min,lon_min_single_file))
-        lon_max = np.max((lon_max,lon_max_single_file))
-        lat_min = np.min((lat_min,lat_min_single_file))
-        lat_max = np.max((lat_max,lat_max_single_file))
-    return lon_min,lon_max,lat_min,lat_max
+def get_list_extents(file_list, round_flag=False, N_round=3, n_jobs=-1):
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()
+    
+    with Pool(n_jobs) as pool:
+        # Partial function with fixed arguments
+        get_extents_partial = partial(get_strip_extents, round_flag=round_flag, N_round=N_round)
+        
+        # Map function across files in parallel
+        results = pool.map(get_extents_partial, file_list)
+    
+    # Combine results
+    results = np.array(results)
+    lon_min = np.min(results[:,0])
+    lon_max = np.max(results[:,1]) 
+    lat_min = np.min(results[:,2])
+    lat_max = np.max(results[:,3])
+    
+    return lon_min, lon_max, lat_min, lat_max
 
 def get_gsw(output_dir,tmp_dir,gsw_dir,epsg_code,lon_min,lon_max,lat_min,lat_max,loc_name=None,gsw_pocket_threshold=0.01,gsw_crs_transform_threshold=0.05):
     '''
@@ -850,28 +862,61 @@ def get_gsw(output_dir,tmp_dir,gsw_dir,epsg_code,lon_min,lon_max,lat_min,lat_max
             subprocess.os.remove(f1)
     return gdf_gsw_main_sea_only,gsw_output_shp_file_main_sea_only_clipped_transformed
 
-def get_strip_shp(strip,tmp_dir):
+def get_strip_shp(strip, tmp_dir, lock=None):
     '''
     Returns the shapefile of the real outline of a strip,
     i.e. not the raster, but the actual area of valid data.
+    Uses file locking to handle concurrent access to tmp directory.
     '''
     strip_base = os.path.splitext(os.path.basename(strip))[0]
-    if subprocess.os.path.exists(f'{tmp_dir}{strip_base}_binary.tif'):
-        subprocess.os.remove(f'{tmp_dir}{strip_base}_binary.tif')
-    if subprocess.os.path.exists(f'{tmp_dir}{strip_base}_binary.shp'):
-        for fi in glob.glob(f'{tmp_dir}{strip_base}_binary.*'):
-            subprocess.os.remove(fi)
-    calc_command = f'gdal_calc.py -A {strip} --calc=\"A>-9999\" --outfile={tmp_dir}{strip_base}_binary.tif --format=GTiff --co=\"COMPRESS=LZW\" --co=\"BIGTIFF=IF_SAFER\" --quiet'
-    subprocess.run(calc_command,shell=True)
-    polygonize_command = f'gdal_polygonize.py -q {tmp_dir}{strip_base}_binary.tif -f "ESRI Shapefile" {tmp_dir}{strip_base}_binary.shp'
-    subprocess.run(polygonize_command,shell=True)
-    wv_strip_shp = gpd.read_file(f'{tmp_dir}{strip_base}_binary.shp')
-    if subprocess.os.path.exists(f'{tmp_dir}{strip_base}_binary.tif'):
-        subprocess.os.remove(f'{tmp_dir}{strip_base}_binary.tif')
-    if subprocess.os.path.exists(f'{tmp_dir}{strip_base}_binary.shp'):
-        for fi in glob.glob(f'{tmp_dir}{strip_base}_binary.*'):
-            subprocess.os.remove(fi)
+    
+    if lock is not None:
+        lock.acquire()
+    
+    try:
+        if subprocess.os.path.exists(f'{tmp_dir}{strip_base}_binary.tif'):
+            subprocess.os.remove(f'{tmp_dir}{strip_base}_binary.tif')
+        if subprocess.os.path.exists(f'{tmp_dir}{strip_base}_binary.shp'):
+            for fi in glob.glob(f'{tmp_dir}{strip_base}_binary.*'):
+                subprocess.os.remove(fi)
+                
+        calc_command = f'gdal_calc.py -A {strip} --calc=\"A>-9999\" --outfile={tmp_dir}{strip_base}_binary.tif --format=GTiff --co=\"COMPRESS=LZW\" --co=\"BIGTIFF=IF_SAFER\" --quiet'
+        subprocess.run(calc_command, shell=True)
+        
+        polygonize_command = f'gdal_polygonize.py -q {tmp_dir}{strip_base}_binary.tif -f "ESRI Shapefile" {tmp_dir}{strip_base}_binary.shp'
+        subprocess.run(polygonize_command, shell=True)
+        
+        wv_strip_shp = gpd.read_file(f'{tmp_dir}{strip_base}_binary.shp')
+        
+        if subprocess.os.path.exists(f'{tmp_dir}{strip_base}_binary.tif'):
+            subprocess.os.remove(f'{tmp_dir}{strip_base}_binary.tif')
+        if subprocess.os.path.exists(f'{tmp_dir}{strip_base}_binary.shp'):
+            for fi in glob.glob(f'{tmp_dir}{strip_base}_binary.*'):
+                subprocess.os.remove(fi)
+    finally:
+        if lock is not None:
+            lock.release()
+            
     return wv_strip_shp
+
+def parallel_get_strip_shp(strips, tmp_dir, n_jobs=-1):
+    '''
+    Parallel version of get_strip_shp using multiprocessing
+    '''
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()
+        
+    # Create a lock for tmp dir access
+    lock = multiprocessing.Manager().Lock()
+    
+    with Pool(n_jobs) as pool:
+        # Partial function with fixed arguments
+        get_shp_partial = partial(get_strip_shp, tmp_dir=tmp_dir, lock=lock)
+        
+        # Map function across strips in parallel
+        results = pool.map(get_shp_partial, strips)
+        
+    return results
 
 
 def filter_strip_gsw(wv_strip_shp,gsw_shp_data,STRIP_AREA_THRESHOLD,POLYGON_AREA_THRESHOLD,GSW_OVERLAP_THRESHOLD,STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD):
