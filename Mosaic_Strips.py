@@ -23,7 +23,7 @@ from dem_utils import (get_strip_list, get_strip_extents, get_gsw, get_strip_shp
 
 from dem_utils import get_strip_list,get_strip_extents
 from dem_utils import get_gsw,get_strip_shp,filter_strip_gsw,find_cloud_water
-from dem_utils import get_contained_strips,get_valid_strip_overlaps,get_minimum_spanning_tree
+from dem_utils import get_valid_strip_overlaps,get_minimum_spanning_tree
 from dem_utils import find_mosaic,build_mosaic,copy_single_strips
 from dem_utils import parallel_get_valid_strip_overlaps, parallel_get_strip_shp, parallel_filter_strip_gsw
 
