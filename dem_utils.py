@@ -15,6 +15,8 @@ from multiprocessing import Pool
 import itertools
 import shutil
 from functools import partial
+import gc  # For explicit garbage collection
+import psutil  # For memory monitoring
 
 def reinsert_nan(array_clean,array_nan):
     '''
@@ -908,44 +910,123 @@ def get_strip_shp(strip, tmp_dir, lock=None):
             
     return wv_strip_shp
 
-def parallel_get_strip_shp(strips, tmp_dir, n_jobs=-1):
+def parallel_get_strip_shp(strips, tmp_dir, n_jobs=-1, chunk_size=None):
     '''
     Parallel version of get_strip_shp using multiprocessing
+    
+    Parameters:
+    -----------
+    strips : list
+        List of file paths to DEM strips
+    tmp_dir : str
+        Directory for temporary files
+    n_jobs : int, default=-1
+        Number of parallel processes to use
+    chunk_size : int, optional
+        Size of chunks for processing very large datasets. If None, will be calculated
+        based on dataset size.
     '''
     if n_jobs == -1:
         n_jobs = multiprocessing.cpu_count()
-        
+    
+    total_strips = len(strips)
+    
+    # For very large datasets with many strips, use chunking to avoid memory issues
+    if chunk_size is None:
+        # Adjust chunk size based on dataset size
+        if total_strips > 10000:
+            # Very large dataset - process in larger chunks
+            chunk_size = max(500, total_strips // (n_jobs * 2))
+        else:
+            # Process all at once for smaller datasets
+            chunk_size = total_strips
+    
     # Create a lock for tmp dir access
     lock = multiprocessing.Manager().Lock()
+    get_shp_partial = partial(get_strip_shp, tmp_dir=tmp_dir, lock=lock)
     
-    with Pool(n_jobs) as pool:
-        # Partial function with fixed arguments
-        get_shp_partial = partial(get_strip_shp, tmp_dir=tmp_dir, lock=lock)
+    results = []
+    
+    # Process in chunks if needed
+    for chunk_start in range(0, total_strips, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, total_strips)
+        chunk = strips[chunk_start:chunk_end]
         
-        # Map function across strips in parallel
-        results = pool.map(get_shp_partial, strips)
+        print(f"Processing chunk {chunk_start//chunk_size + 1}/{(total_strips+chunk_size-1)//chunk_size}: strips {chunk_start+1}-{chunk_end} of {total_strips}")
+        
+        with Pool(n_jobs) as pool:
+            chunk_results = pool.map(get_shp_partial, chunk)
+            results.extend(chunk_results)
+            
+        # Explicitly clean up to free memory between chunks
+        gc.collect()
         
     return results
 
 
 def parallel_filter_strip_gsw(wv_strip_shp_list, gsw_shp_data, STRIP_AREA_THRESHOLD, POLYGON_AREA_THRESHOLD, 
-                            GSW_OVERLAP_THRESHOLD, STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD, n_jobs=-1):
+                            GSW_OVERLAP_THRESHOLD, STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD, n_jobs=-1, chunk_size=None):
     '''
     Parallel version of filter_strip_gsw using multiprocessing
+    
+    Parameters:
+    -----------
+    wv_strip_shp_list : list
+        List of strip shapefile objects
+    gsw_shp_data : GeoDataFrame or None
+        GeoDataFrame containing water polygons
+    STRIP_AREA_THRESHOLD : float
+        Minimum area for a strip to be considered
+    POLYGON_AREA_THRESHOLD : float
+        Minimum area for a polygon to be considered
+    GSW_OVERLAP_THRESHOLD : float
+        Maximum allowed water coverage
+    STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD : float
+        Threshold for total area percentage
+    n_jobs : int, default=-1
+        Number of parallel processes to use
+    chunk_size : int, optional
+        Size of chunks for processing very large datasets. If None, will be calculated
+        based on dataset size.
     '''
     if n_jobs == -1:
         n_jobs = multiprocessing.cpu_count()
     
-    with Pool(n_jobs) as pool:
-        # Partial function with fixed arguments
-        filter_partial = partial(filter_strip_gsw, gsw_shp_data=gsw_shp_data,
-                               STRIP_AREA_THRESHOLD=STRIP_AREA_THRESHOLD,
-                               POLYGON_AREA_THRESHOLD=POLYGON_AREA_THRESHOLD,
-                               GSW_OVERLAP_THRESHOLD=GSW_OVERLAP_THRESHOLD,
-                               STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD=STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD)
+    total_strips = len(wv_strip_shp_list)
+    
+    # For very large datasets with many strips, use chunking to avoid memory issues
+    if chunk_size is None:
+        # Adjust chunk size based on dataset size
+        if total_strips > 10000:
+            # Very large dataset - process in larger chunks
+            chunk_size = max(500, total_strips // (n_jobs * 2))
+        else:
+            # Process all at once for smaller datasets
+            chunk_size = total_strips
+    
+    # Create partial function with fixed arguments
+    filter_partial = partial(filter_strip_gsw, gsw_shp_data=gsw_shp_data,
+                            STRIP_AREA_THRESHOLD=STRIP_AREA_THRESHOLD,
+                            POLYGON_AREA_THRESHOLD=POLYGON_AREA_THRESHOLD,
+                            GSW_OVERLAP_THRESHOLD=GSW_OVERLAP_THRESHOLD,
+                            STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD=STRIP_TOTAL_AREA_PERCENTAGE_THRESHOLD)
+    
+    results = []
+    
+    # Process in chunks if needed
+    for chunk_start in range(0, total_strips, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, total_strips)
+        chunk = wv_strip_shp_list[chunk_start:chunk_end]
         
-        # Map function across strips in parallel
-        results = pool.map(filter_partial, wv_strip_shp_list)
+        if chunk_size < total_strips:
+            print(f"Filtering chunk {chunk_start//chunk_size + 1}/{(total_strips+chunk_size-1)//chunk_size}: strips {chunk_start+1}-{chunk_end} of {total_strips}")
+        
+        with Pool(n_jobs) as pool:
+            chunk_results = pool.map(filter_partial, chunk)
+            results.extend(chunk_results)
+            
+        # Explicitly clean up to free memory between chunks
+        gc.collect()
     
     return results
 
@@ -1078,40 +1159,97 @@ def parallel_get_contained_strips(strip_shp_data, strip_dates, epsg_code, STRIP_
         results = pool.map(process_strip, range(len(strip_shp_data)))
     return np.array(results)
 
-def parallel_get_valid_strip_overlaps(strip_shp_data, gsw_main_sea_only_buffered, AREA_OVERLAP_THRESHOLD, GSW_INTERSECTION_THRESHOLD, n_jobs=-1):
+def parallel_get_valid_strip_overlaps(strip_shp_data, gsw_main_sea_only_buffered, AREA_OVERLAP_THRESHOLD, GSW_INTERSECTION_THRESHOLD, n_jobs=-1, chunk_size=None):
     '''
     Parallel version of get_valid_strip_overlaps using multiprocessing
+    
+    Parameters:
+    -----------
+    strip_shp_data : GeoDataFrame
+        GeoDataFrame containing strip geometries
+    gsw_main_sea_only_buffered : GeoDataFrame or None
+        GeoDataFrame containing water polygons
+    AREA_OVERLAP_THRESHOLD : float
+        Minimum overlap area to consider
+    GSW_INTERSECTION_THRESHOLD : float
+        Maximum allowed water coverage
+    n_jobs : int, default=-1
+        Number of parallel processes to use
+    chunk_size : int, optional
+        Size of chunks for processing large datasets. If None, will be calculated
+        based on dataset size.
     '''
     if n_jobs == -1:
         n_jobs = multiprocessing.cpu_count()
 
+    # Precompute and cache the union of all geometries for better performance
     if gsw_main_sea_only_buffered is not None:
         gsw_polygon = shapely.ops.unary_union(gsw_main_sea_only_buffered.geometry)
     else:
         gsw_polygon = None
-
+    
+    # Precompute geometry intersections for large datasets
+    total_strips = len(strip_shp_data)
+    
+    # Determine chunk size based on dataset size if not specified
+    if chunk_size is None:
+        # For very large datasets (>5000 strips), use larger chunks
+        if total_strips > 5000:
+            chunk_size = max(100, total_strips // (n_jobs * 4))
+        else:
+            chunk_size = max(20, total_strips // (n_jobs * 2))
+    
     def process_strip(i):
-        valid_overlaps = np.zeros(len(strip_shp_data))
-        idx_intersection = np.asarray([strip_shp_data.geometry[i].intersects(geom) for geom in strip_shp_data.geometry])
+        valid_overlaps = np.zeros(total_strips)
+        strip_geom = strip_shp_data.geometry[i]
+        
+        # First quickly determine intersections to avoid unnecessary computations
+        idx_intersection = np.asarray([strip_geom.intersects(geom) for geom in strip_shp_data.geometry])
         idx_intersection[i] = False
         
-        idx_area_threshold = [strip_shp_data.geometry[i].intersection(adjacent_geom).area > AREA_OVERLAP_THRESHOLD 
-                            if idx_intersection[ii] else False 
-                            for ii,adjacent_geom in enumerate(strip_shp_data.geometry)]
+        # Only process strips that intersect to save memory and computation
+        intersecting_indices = np.where(idx_intersection)[0]
         
+        # Process area threshold calculations only for intersecting strips
+        idx_area_threshold = np.zeros(total_strips, dtype=bool)
+        for ii in intersecting_indices:
+            try:
+                intersection_area = strip_geom.intersection(strip_shp_data.geometry[ii]).area
+                idx_area_threshold[ii] = intersection_area > AREA_OVERLAP_THRESHOLD
+            except Exception as e:
+                # Handle potential topology errors
+                print(f"Warning: Error calculating intersection for strip {i} with strip {ii}: {e}")
+                idx_area_threshold[ii] = False
+        
+        # Process GSW threshold calculations
         if gsw_main_sea_only_buffered is not None:
-            idx_gsw_threshold = [strip_shp_data.geometry[i].intersection(adjacent_geom).intersection(gsw_polygon).area / 
-                               strip_shp_data.geometry[i].intersection(adjacent_geom).area < GSW_INTERSECTION_THRESHOLD 
-                               if idx_intersection[ii] else False 
-                               for ii,adjacent_geom in enumerate(strip_shp_data.geometry)]
+            idx_gsw_threshold = np.zeros(total_strips, dtype=bool)
+            for ii in intersecting_indices:
+                if idx_area_threshold[ii]:
+                    try:
+                        intersection = strip_geom.intersection(strip_shp_data.geometry[ii])
+                        water_intersection = intersection.intersection(gsw_polygon).area
+                        idx_gsw_threshold[ii] = water_intersection / intersection.area < GSW_INTERSECTION_THRESHOLD
+                    except Exception as e:
+                        print(f"Warning: Error calculating GSW intersection for strip {i} with strip {ii}: {e}")
+                        idx_gsw_threshold[ii] = False
         else:
             idx_gsw_threshold = idx_area_threshold
             
         valid_overlaps = np.logical_and(idx_area_threshold, idx_gsw_threshold).astype(int)
         return valid_overlaps
 
-    with Pool(n_jobs) as pool:
-        results = pool.map(process_strip, range(len(strip_shp_data)))
+    # Process strips in chunks to manage memory usage
+    results = []
+    
+    # Process in smaller chunks if dataset is very large
+    for chunk_start in range(0, total_strips, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, total_strips)
+        chunk_indices = range(chunk_start, chunk_end)
+        
+        with Pool(n_jobs) as pool:
+            chunk_results = pool.map(process_strip, chunk_indices)
+            results.extend(chunk_results)
     
     return np.array(results)
 
