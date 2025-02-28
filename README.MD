@@ -113,6 +113,14 @@ Given a set of overlapping DEM tiles (often called strips), this script will sti
 #### Running
 
     python Mosaic_Strips.py [optional flags]
+    
+#### Enhanced Parallel Version
+
+For high-performance systems or large datasets, use the enhanced parallel version:
+
+    python Mosaic_Strips_parallel.py --parallel [optional flags]
+
+This version provides multi-level parallelism, intelligent resource allocation, and memory management for large datasets. For detailed usage instructions, see [PARALLEL_USAGE.md](PARALLEL_USAGE.md).
 
 <p float "middle">
     <a>
