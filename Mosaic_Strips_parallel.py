@@ -322,7 +322,7 @@ def main():
     epsg_args = []
     for epsg_code in unique_epsg_list:
         epsg_args.append((epsg_code, full_strip_list, tmp_dir, output_dir, output_name, config,
-                          nested_cpus, args.corrected, args.cloud_water_filter, args.simplify, args.gsw))
+                          nested_cpus, args.corrected, args.cloud_water_filter, args.simplify, args.gsw, chunk_size))
 
     # Set up memory monitoring before pool creation
     print(f"Starting memory: {psutil.virtual_memory().used / (1024**3):.2f} GB used out of {system_memory:.2f} GB")
