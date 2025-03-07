@@ -43,7 +43,7 @@ def process_epsg(args):
       - Saves the processed shapefile and builds mosaics.
     """
     (epsg_code, full_strip_list, tmp_dir, output_dir, output_name, config,
-     N_cpus, corrected_flag, cloud_water_filter_flag, simplify_flag, gsw_file) = args
+     N_cpus, corrected_flag, cloud_water_filter_flag, simplify_flag, gsw_file, chunk_size) = args
     
     # Monitor memory usage
     process = psutil.Process(os.getpid())
